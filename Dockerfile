@@ -1,4 +1,9 @@
 FROM python:3.13-slim
+
+LABEL org.opencontainers.image.source="https://github.com/scottgardner777/ninja-depth"
+LABEL org.opencontainers.image.description="Monocular depth estimation API — depth maps and 3D meshes"
+LABEL org.opencontainers.image.licenses="All rights reserved"
+
 WORKDIR /app
 
 # Install torch CPU-only first (smaller image, ~800MB vs ~2GB)
