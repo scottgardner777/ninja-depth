@@ -1,0 +1,22 @@
+services:
+  api:
+    build: .
+    ports:
+      - "18025:18025"
+    environment:
+      - JWT_SECRET=${JWT_SECRET}
+      - API_KEY=${API_KEY}
+      - CORS_ALLOW_ORIGINS=${CORS_ALLOW_ORIGINS:-http://localhost:3000}
+      - DEFAULT_MODEL=${DEFAULT_MODEL:-depth-anything-v2}
+    volumes:
+      - depth-cache:/app/cache
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:18025/health\")'"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  depth-cache:
