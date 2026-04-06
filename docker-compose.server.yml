@@ -7,7 +7,7 @@ services:
     environment:
       - JWT_SECRET=${JWT_SECRET:?Set JWT_SECRET in .env}
       - API_KEY=${API_KEY:?Set API_KEY in .env}
-      - CORS_ALLOW_ORIGINS=https://ninjadepth.ninja
+      - CORS_ALLOW_ORIGINS=https://ninja.ing
       - DEFAULT_MODEL=depth-anything-v2
     ports: !reset []
     networks:
