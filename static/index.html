@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ninja-depth</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #0a0a0a; color: #e0e0e0;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+  min-height: 100vh;
+}
+.header {
+  padding: 20px 32px;
+  border-bottom: 1px solid #1a1a1a;
+  display: flex; align-items: center; gap: 16px;
+}
+.header h1 { font-size: 20px; font-weight: 600; letter-spacing: 1px; }
+.header h1 span { color: #00ff88; }
+.header .tag {
+  font-size: 11px; padding: 2px 8px; border-radius: 3px;
+  background: #1a1a1a; color: #888;
+}
+.container { max-width: 1400px; margin: 0 auto; padding: 24px 32px; }
+
+/* Controls row */
+.controls {
+  display: flex; gap: 16px; align-items: center;
+  margin-bottom: 24px; flex-wrap: wrap;
+}
+.controls label { font-size: 12px; color: #888; }
+.controls select, .controls input[type=range] {
+  background: #141414; border: 1px solid #2a2a2a; color: #e0e0e0;
+  padding: 6px 10px; border-radius: 4px; font-family: inherit; font-size: 13px;
+}
+.controls select:focus { border-color: #00ff88; outline: none; }
+.res-val { font-size: 12px; color: #00ff88; min-width: 40px; }
+
+/* Drop zone */
+.dropzone {
+  border: 2px dashed #2a2a2a; border-radius: 8px;
+  padding: 48px; text-align: center; cursor: pointer;
+  transition: all 0.2s;
+  margin-bottom: 24px;
+}
+.dropzone:hover, .dropzone.dragover {
+  border-color: #00ff88; background: rgba(0,255,136,0.03);
+}
+.dropzone .icon { font-size: 36px; margin-bottom: 12px; opacity: 0.4; }
+.dropzone p { color: #666; font-size: 13px; }
+.dropzone .hint { font-size: 11px; color: #444; margin-top: 8px; }
+.dropzone input { display: none; }
+
+/* Results grid */
+.results {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 16px; margin-bottom: 24px;
+}
+.panel {
+  background: #111; border: 1px solid #1a1a1a; border-radius: 6px;
+  overflow: hidden;
+}
+.panel-header {
+  padding: 10px 16px; border-bottom: 1px solid #1a1a1a;
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 12px; color: #888;
+}
+.panel-header .badge {
+  font-size: 10px; padding: 2px 6px; border-radius: 3px;
+  background: #1a2a1a; color: #00ff88;
+}
+.panel-body { padding: 0; position: relative; min-height: 300px; display: flex; align-items: center; justify-content: center; }
+.panel-body img {
+  max-width: 100%; max-height: 500px; display: block; margin: 0 auto;
+}
+
+/* 3D viewer */
+.viewer-panel {
+  grid-column: 1 / -1; min-height: 500px;
+}
+.viewer-panel .panel-body { height: 500px; }
+#viewer3d { width: 100%; height: 100%; display: block; }
+
+/* Status bar */
+.status {
+  font-size: 11px; color: #555; padding: 8px 0;
+  display: flex; gap: 24px;
+}
+.status .ok { color: #00ff88; }
+.status .warn { color: #ffaa00; }
+
+/* Loading */
+.spinner {
+  display: none; flex-direction: column; align-items: center; gap: 12px;
+}
+.spinner.active { display: flex; }
+.spinner .ring {
+  width: 32px; height: 32px; border: 2px solid #1a1a1a;
+  border-top-color: #00ff88; border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.spinner p { font-size: 12px; color: #666; }
+
+/* Download buttons */
+.btn {
+  background: #141414; border: 1px solid #2a2a2a; color: #ccc;
+  padding: 5px 12px; border-radius: 4px; font-family: inherit;
+  font-size: 11px; cursor: pointer; transition: all 0.15s;
+  text-decoration: none; display: inline-block;
+}
+.btn:hover { border-color: #00ff88; color: #00ff88; }
+.btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.btn-group { display: flex; gap: 8px; }
+
+/* Placeholder */
+.placeholder { color: #333; font-size: 13px; }
+
+@media (max-width: 768px) {
+  .results { grid-template-columns: 1fr; }
+  .container { padding: 16px; }
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>ninja-<span>depth</span></h1>
+  <span class="tag">monocular depth estimation</span>
+</div>
+
+<div class="container">
+
+  <!-- Controls -->
+  <div class="controls">
+    <div>
+      <label>Model</label><br>
+      <select id="modelSelect">
+        <option value="depth-anything-v2" selected>Depth Anything V2 (24M, fast)</option>
+        <option value="midas">DPT-Hybrid MiDaS (123M)</option>
+      </select>
+    </div>
+    <div>
+      <label>Mesh Resolution</label><br>
+      <input type="range" id="resSlider" min="64" max="1024" step="64" value="512">
+      <span class="res-val" id="resVal">512</span>
+    </div>
+  </div>
+
+  <!-- Drop zone -->
+  <div class="dropzone" id="dropzone">
+    <div class="icon">&#9651;</div>
+    <p>Drop an image here or click to upload</p>
+    <p class="hint">JPEG / PNG / WebP &bull; up to 4096&times;4096</p>
+    <input type="file" id="fileInput" accept="image/*">
+  </div>
+
+  <!-- Results -->
+  <div class="results" id="results" style="display:none;">
+    <div class="panel">
+      <div class="panel-header">
+        <span>Original</span>
+        <span id="imgDims"></span>
+      </div>
+      <div class="panel-body" id="originalPanel">
+        <span class="placeholder">No image</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">
+        <span>Depth Map</span>
+        <div class="btn-group">
+          <span id="depthTime" class="badge"></span>
+          <a id="dlDepth" class="btn" download="depth.png">Download PNG</a>
+        </div>
+      </div>
+      <div class="panel-body" id="depthPanel">
+        <div class="spinner" id="depthSpinner">
+          <div class="ring"></div>
+          <p>Estimating depth&hellip;</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel viewer-panel">
+      <div class="panel-header">
+        <span>3D Mesh</span>
+        <div class="btn-group">
+          <span id="meshTime" class="badge"></span>
+          <a id="dlMesh" class="btn" download="scene.glb">Download GLB</a>
+        </div>
+      </div>
+      <div class="panel-body" id="meshPanel">
+        <div class="spinner" id="meshSpinner">
+          <div class="ring"></div>
+          <p>Generating mesh&hellip;</p>
+        </div>
+        <canvas id="viewer3d"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="status" id="statusBar">
+    <span id="statusHealth"></span>
+    <span id="statusCache"></span>
+  </div>
+
+</div>
+
+<!-- Three.js from CDN -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.171.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.171.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+// --- State ---
+let scene, camera, renderer, controls, currentMesh;
+const API = window.location.origin;
+
+// --- DOM refs ---
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+const modelSelect = document.getElementById('modelSelect');
+const resSlider = document.getElementById('resSlider');
+const resVal = document.getElementById('resVal');
+const results = document.getElementById('results');
+const originalPanel = document.getElementById('originalPanel');
+const depthPanel = document.getElementById('depthPanel');
+const meshPanel = document.getElementById('meshPanel');
+const depthSpinner = document.getElementById('depthSpinner');
+const meshSpinner = document.getElementById('meshSpinner');
+const imgDims = document.getElementById('imgDims');
+const depthTime = document.getElementById('depthTime');
+const meshTime = document.getElementById('meshTime');
+const dlDepth = document.getElementById('dlDepth');
+const dlMesh = document.getElementById('dlMesh');
+
+// --- Resolution slider ---
+resSlider.addEventListener('input', () => { resVal.textContent = resSlider.value; });
+
+// --- Drop zone ---
+dropzone.addEventListener('click', () => fileInput.click());
+dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('dragover'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+dropzone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropzone.classList.remove('dragover');
+  if (e.dataTransfer.files.length) processFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', () => {
+  if (fileInput.files.length) processFile(fileInput.files[0]);
+});
+
+// --- Process uploaded file ---
+async function processFile(file) {
+  if (!file.type.startsWith('image/')) return;
+
+  // Show original
+  results.style.display = 'grid';
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => { imgDims.textContent = `${img.width} × ${img.height}`; };
+  img.src = url;
+  originalPanel.innerHTML = '';
+  originalPanel.appendChild(img);
+
+  const model = modelSelect.value;
+  const resolution = resSlider.value;
+
+  // Run depth + mesh in parallel
+  fetchDepth(file, model);
+  fetchMesh(file, model, resolution);
+}
+
+async function fetchDepth(file, model) {
+  depthSpinner.classList.add('active');
+  depthPanel.querySelectorAll('img').forEach(i => i.remove());
+  dlDepth.style.display = 'none';
+  depthTime.textContent = '';
+
+  const form = new FormData();
+  form.append('file', file);
+
+  try {
+    const res = await fetch(`${API}/depth?model=${model}`, { method: 'POST', body: form });
+    if (!res.ok) throw new Error(await res.text());
+    const blob = await res.blob();
+    const t = res.headers.get('X-Processing-Time') || '';
+    const cached = res.headers.get('X-Cache-Hit') === 'true';
+
+    depthTime.textContent = t + (cached ? ' (cached)' : '');
+    const imgUrl = URL.createObjectURL(blob);
+    const img = document.createElement('img');
+    img.src = imgUrl;
+    depthPanel.appendChild(img);
+    dlDepth.href = imgUrl;
+    dlDepth.style.display = 'inline-block';
+  } catch (e) {
+    depthPanel.innerHTML += `<span class="placeholder" style="color:#ff4444">${e.message}</span>`;
+  }
+  depthSpinner.classList.remove('active');
+}
+
+async function fetchMesh(file, model, resolution) {
+  meshSpinner.classList.add('active');
+  const canvas = document.getElementById('viewer3d');
+  canvas.style.display = 'none';
+  dlMesh.style.display = 'none';
+  meshTime.textContent = '';
+
+  const form = new FormData();
+  form.append('file', file);
+
+  try {
+    const res = await fetch(`${API}/mesh?model=${model}&resolution=${resolution}`, { method: 'POST', body: form });
+    if (!res.ok) throw new Error(await res.text());
+    const blob = await res.blob();
+    const t = res.headers.get('X-Processing-Time') || '';
+    const cached = res.headers.get('X-Cache-Hit') === 'true';
+    meshTime.textContent = t + (cached ? ' (cached)' : '');
+
+    const glbUrl = URL.createObjectURL(blob);
+    dlMesh.href = glbUrl;
+    dlMesh.style.display = 'inline-block';
+
+    canvas.style.display = 'block';
+    loadGLB(glbUrl, canvas);
+  } catch (e) {
+    meshPanel.innerHTML += `<span class="placeholder" style="color:#ff4444">${e.message}</span>`;
+  }
+  meshSpinner.classList.remove('active');
+}
+
+// --- Three.js viewer ---
+function loadGLB(url, canvas) {
+  if (renderer) { renderer.dispose(); }
+  if (currentMesh) { scene.remove(currentMesh); }
+
+  const w = canvas.parentElement.clientWidth;
+  const h = canvas.parentElement.clientHeight;
+
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0a0a0a);
+
+  camera = new THREE.PerspectiveCamera(50, w / h, 0.1, 1000);
+  camera.position.set(0, 0, 15);
+
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setSize(w, h);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+  controls = new OrbitControls(camera, canvas);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.05;
+
+  // Lighting
+  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+  const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+  dir.position.set(5, 10, 7);
+  scene.add(dir);
+
+  const loader = new GLTFLoader();
+  loader.load(url, (gltf) => {
+    currentMesh = gltf.scene;
+
+    // Center and scale
+    const box = new THREE.Box3().setFromObject(currentMesh);
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const scale = 10 / maxDim;
+    currentMesh.scale.setScalar(scale);
+    currentMesh.position.sub(center.multiplyScalar(scale));
+
+    scene.add(currentMesh);
+    controls.target.set(0, 0, 0);
+    controls.update();
+  });
+
+  function animate() {
+    requestAnimationFrame(animate);
+    controls.update();
+    renderer.render(scene, camera);
+  }
+  animate();
+
+  // Resize handler
+  const ro = new ResizeObserver(() => {
+    const w2 = canvas.parentElement.clientWidth;
+    const h2 = canvas.parentElement.clientHeight;
+    camera.aspect = w2 / h2;
+    camera.updateProjectionMatrix();
+    renderer.setSize(w2, h2);
+  });
+  ro.observe(canvas.parentElement);
+}
+
+// --- Health check ---
+fetch(`${API}/health`).then(r => r.json()).then(d => {
+  document.getElementById('statusHealth').innerHTML =
+    `<span class="ok">&#9679;</span> API online &bull; models: ${d.models_available.join(', ')}`;
+  document.getElementById('statusCache').textContent =
+    `cache: ${d.cache.entries} entries, ${d.cache.size_mb} MB`;
+}).catch(() => {
+  document.getElementById('statusHealth').innerHTML =
+    `<span class="warn">&#9679;</span> API offline`;
+});
+</script>
+
+</body>
+</html>

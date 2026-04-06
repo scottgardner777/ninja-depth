@@ -11,14 +11,17 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import numpy as np
 from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import FileResponse, Response
+from fastapi.staticfiles import StaticFiles
 from jose import JWTError, jwt
 from PIL import Image
 
+from core import cache
 from core.depth import VALID_MODELS, estimator
 from core.mesh import depth_to_glb
 
@@ -36,6 +39,8 @@ MAX_MESH_RES = int(os.getenv("MAX_MESH_RESOLUTION", "1024"))
 JWT_ALGORITHM = "HS256"
 COOKIE_NAME = "ninja-depth-token"
 
+STATIC_DIR = Path(__file__).parent / "static"
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
 log = logging.getLogger("ninja-depth")
 
@@ -47,6 +52,7 @@ log = logging.getLogger("ninja-depth")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("ninja-depth starting — models loaded on first request")
+    log.info("Cache: %s", cache.stats())
     yield
     log.info("ninja-depth shutting down")
 
@@ -159,8 +165,29 @@ def _depth_to_png(depth: np.ndarray) -> bytes:
     return buf.getvalue()
 
 
+def _estimate_cached(img: Image.Image, model: str) -> tuple[np.ndarray, bool]:
+    """Estimate depth with cache. Returns (depth_array, was_cached)."""
+    cached = cache.get(img, model)
+    if cached is not None:
+        return cached, True
+    depth = estimator.estimate(img, model=model)
+    cache.put(img, model, depth)
+    return depth, False
+
+
 # ---------------------------------------------------------------------------
-# Public endpoints (no auth)
+# UI route
+# ---------------------------------------------------------------------------
+
+
+@app.get("/ui")
+def ui_page():
+    """Serve the depth estimation UI."""
+    return FileResponse(STATIC_DIR / "index.html", media_type="text/html")
+
+
+# ---------------------------------------------------------------------------
+# Public API endpoints (no auth)
 # ---------------------------------------------------------------------------
 
 
@@ -170,7 +197,7 @@ def root():
         "app": "ninja-depth",
         "version": "1.0.0",
         "description": "Monocular depth estimation — depth maps & 3D meshes",
-        "endpoints": ["/health", "/models", "/depth", "/mesh"],
+        "endpoints": ["/health", "/models", "/depth", "/mesh", "/ui"],
     }
 
 
@@ -181,6 +208,7 @@ def health():
         "models_available": sorted(VALID_MODELS),
         "models_loaded": estimator.loaded_models(),
         "default_model": DEFAULT_MODEL,
+        "cache": cache.stats(),
     }
 
 
@@ -216,7 +244,7 @@ async def depth_endpoint(
     model: str = Query(default=None),
     _auth: dict = Depends(require_auth),
 ):
-    """Upload image, receive grayscale depth map PNG (uint16)."""
+    """Upload image, receive grayscale depth map PNG."""
     model = model or DEFAULT_MODEL
     _validate_model(model)
 
@@ -224,9 +252,9 @@ async def depth_endpoint(
     log.info("Depth request: %dx%d, model=%s", img.width, img.height, model)
 
     t0 = time.perf_counter()
-    depth = estimator.estimate(img, model=model)
+    depth, was_cached = _estimate_cached(img, model)
     elapsed = time.perf_counter() - t0
-    log.info("Depth estimated in %.2fs", elapsed)
+    log.info("Depth estimated in %.2fs (cached=%s)", elapsed, was_cached)
 
     png_bytes = _depth_to_png(depth)
 
@@ -237,6 +265,7 @@ async def depth_endpoint(
             "Content-Disposition": "attachment; filename=depth.png",
             "X-Depth-Model": model,
             "X-Processing-Time": f"{elapsed:.3f}s",
+            "X-Cache-Hit": str(was_cached).lower(),
         },
     )
 
@@ -257,19 +286,19 @@ async def mesh_endpoint(
     img = await _read_image(file)
     log.info(
         "Mesh request: %dx%d, model=%s, resolution=%d",
-        img.width,
-        img.height,
-        model,
-        resolution,
+        img.width, img.height, model, resolution,
     )
 
     t0 = time.perf_counter()
-    depth = estimator.estimate(img, model=model)
+    depth, was_cached = _estimate_cached(img, model)
     t1 = time.perf_counter()
     glb_bytes = depth_to_glb(img, depth, resolution=resolution)
     t2 = time.perf_counter()
 
-    log.info("Mesh generated: depth=%.2fs, mesh=%.2fs", t1 - t0, t2 - t1)
+    log.info(
+        "Mesh generated: depth=%.2fs (cached=%s), mesh=%.2fs",
+        t1 - t0, was_cached, t2 - t1,
+    )
 
     return Response(
         content=glb_bytes,
@@ -279,5 +308,24 @@ async def mesh_endpoint(
             "X-Depth-Model": model,
             "X-Mesh-Resolution": str(resolution),
             "X-Processing-Time": f"{t2 - t0:.3f}s",
+            "X-Cache-Hit": str(was_cached).lower(),
         },
     )
+
+
+@app.get("/cache/stats")
+def cache_stats():
+    return cache.stats()
+
+
+@app.delete("/cache", dependencies=[Depends(require_auth)])
+def cache_clear():
+    n = cache.clear()
+    return {"cleared": n}
+
+
+# ---------------------------------------------------------------------------
+# Static files (must be last — catch-all mount)
+# ---------------------------------------------------------------------------
+
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
