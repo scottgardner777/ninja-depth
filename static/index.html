@@ -226,7 +226,9 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 // --- State ---
 let scene, camera, renderer, controls, currentMesh;
-const API = window.location.origin;
+// Detect base path: if served at /depth/ui, API base is /depth
+const _path = window.location.pathname.replace(/\/ui\/?$/, '').replace(/\/static\/.*$/, '');
+const API = window.location.origin + _path;
 
 // --- DOM refs ---
 const dropzone = document.getElementById('dropzone');
