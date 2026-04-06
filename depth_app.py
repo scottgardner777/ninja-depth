@@ -151,9 +151,9 @@ def _validate_model(model: str) -> str:
 
 
 def _depth_to_png(depth: np.ndarray) -> bytes:
-    """Convert float32 depth array to uint16 grayscale PNG."""
-    depth_u16 = (depth * 65535).clip(0, 65535).astype(np.uint16)
-    img = Image.fromarray(depth_u16, mode="I;16")
+    """Convert float32 depth array to 8-bit grayscale PNG."""
+    depth_u8 = (depth * 255).clip(0, 255).astype(np.uint8)
+    img = Image.fromarray(depth_u8, mode="L")
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
@@ -196,9 +196,9 @@ def models():
             },
             {
                 "id": "midas",
-                "name": "MiDaS v3.1 Small",
-                "params": "21M",
-                "description": "Intel ISL monocular depth estimation",
+                "name": "DPT-Hybrid MiDaS",
+                "params": "123M",
+                "description": "Intel DPT-Hybrid monocular depth estimation",
             },
         ],
         "default": DEFAULT_MODEL,
