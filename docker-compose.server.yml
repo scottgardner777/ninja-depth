@@ -4,6 +4,7 @@
 
 services:
   api:
+    mem_limit: 3g
     environment:
       - JWT_SECRET=${JWT_SECRET:?Set JWT_SECRET in .env}
       - API_KEY=${API_KEY:?Set API_KEY in .env}
