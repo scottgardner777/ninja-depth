@@ -1,5 +1,5 @@
 # Copyright 2026 Scott Gardner, ninja.ing. All rights reserved.
-# Production override — joins RTM network for Caddy routing
+# Production override — joins ninja-shared network for Caddy routing via WireGuard
 # Usage: docker compose -f docker-compose.yml -f docker-compose.server.yml up -d
 
 services:
@@ -10,13 +10,13 @@ services:
       - API_KEY=${API_KEY:?Set API_KEY in .env}
       - CORS_ALLOW_ORIGINS=https://ninja.ing
       - DEFAULT_MODEL=depth-anything-v2
-    ports: !reset []
+    ports:
+      - "10.0.0.2:4025:18025"
     networks:
       - default
-      - rtm
+      - ninja-shared
 
 networks:
   default:
-  rtm:
+  ninja-shared:
     external: true
-    name: rapid-threat-modeler_default
